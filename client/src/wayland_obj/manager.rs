@@ -1,0 +1,154 @@
+use std::{cell::RefCell, default::Default, rc::Rc};
+
+use wayland_client::{
+    protocol::{
+        wl_compositor::WlCompositor, wl_output::WlOutput, wl_registry::WlRegistry, wl_seat::WlSeat,
+        wl_shm::WlShm
+    },
+    Display, EventQueue, GlobalEvent, GlobalImplementor, Interface, Proxy
+};
+
+use crate::area::Size;
+
+use super::{
+    layer_shell::{self, LayerShellManager, LayerSurface, WlrLayerShell, WLR_LAYER_SHELL_VERSION},
+    output::{OutputEventHandler, WlOutputManager, WL_OUTPUT_VERSION},
+    wl_compositor::{WlCompositorManager, WL_COMPOSITOR_VERSION},
+    wl_seat::{WlSeatManager, WL_SEAT_VERSION},
+    wl_shm::{Buffer, WlShmManager, WL_SHM_VERSION}
+};
+
+thread_local! {
+    pub static WAYLAND: RefCell<Option<WaylandManager>> = RefCell::new(None);
+}
+
+pub struct WaylandManager {
+    compositor_manager: WlCompositorManager,
+    output_manager: WlOutputManager,
+    seat_manager: WlSeatManager,
+    shell_manager: LayerShellManager,
+    shm_manager: WlShmManager
+}
+
+// pub fn create_surface() -> Result<WlSurface, ()> {
+//     WAYLAND.with(|wayland| {
+//         let wayland = wayland.borrow();
+//         let wayland = wayland.as_ref().expect("Wayland not initialized");
+
+//         wayland.compositor_manager.create_surface()
+//     })
+// }
+
+pub fn create_buffer(size: Size) -> Result<Buffer, ()> {
+    WAYLAND.with(|wayland| {
+        let wayland = wayland.borrow();
+        let wayland = wayland.as_ref().expect("Wayland not initialized");
+
+        wayland.shm_manager.create_buffer(size)
+    })
+}
+
+pub fn global_callback(event: GlobalEvent, registry: WlRegistry) {
+    WAYLAND.with(|wayland| {
+        let wayland = &mut wayland.borrow_mut();
+        let wayland = wayland.as_mut().expect("Wayland not initialized");
+        match event {
+            GlobalEvent::New {
+                id,
+                interface,
+                version
+            } => wayland.new_global(registry, id, &interface, version),
+            _ => unimplemented!("GlobalEvent")
+        }
+    })
+}
+
+// TODO(ried): improve error handling: return something
+pub fn init_wayland() -> Result<(Display, EventQueue), ()> {
+    let connection = Display::connect_to_env();
+    if let Err(err) = connection {
+        use wayland_client::ConnectError::*;
+        match err {
+            NoWaylandLib => error!("Could not find Wayland library, is it installed and in PATH?"),
+            NoCompositorListening => {
+                error!("Could not connect to Wayland server. Is it running?");
+                error!(
+                    "WAYLAND_DISPLAY={}",
+                    std::env::var("WAYLAND_DISPLAY").unwrap_or_default()
+                );
+            },
+            InvalidName => error!("Invalid socket name provided in WAYLAND_SOCKET"),
+            XdgRuntimeDirNotSet => error!("XDG_RUNTIME_DIR must be set"),
+            InvalidFd => error!("Invalid socket provided in WAYLAND_SOCKET")
+        }
+        return Err(());
+    }
+
+    let (display, event_queue) = connection.unwrap();
+
+    WAYLAND.with(|wayland| {
+        let wayland = &mut wayland.borrow_mut();
+        let way_man = WaylandManager::new(crate::lua::OutputHandler);
+        (*wayland).replace(way_man);
+    });
+
+    Ok((display, event_queue))
+}
+
+impl WaylandManager {
+    pub fn new(output_handler: impl OutputEventHandler + 'static) -> Self {
+        let output_handler = Rc::new(output_handler);
+        WaylandManager {
+            compositor_manager: WlCompositorManager::default(),
+            output_manager: WlOutputManager::new(output_handler),
+            seat_manager: WlSeatManager::default(),
+            shell_manager: LayerShellManager,
+            shm_manager: WlShmManager::new()
+        }
+    }
+
+    fn new_global(&mut self, registry: WlRegistry, id: u32, interface: &str, version: u32) {
+        match interface {
+            WlCompositor::NAME => Self::handle::<WlCompositor>(
+                registry,
+                WL_COMPOSITOR_VERSION,
+                version,
+                id,
+                &mut self.compositor_manager
+            ),
+            WlOutput::NAME => {
+                Self::handle::<WlOutput>(registry, WL_OUTPUT_VERSION, version, id, &mut self.output_manager)
+            },
+            WlSeat::NAME => {
+                Self::handle::<WlSeat>(registry, WL_SEAT_VERSION, version, id, &mut self.seat_manager)
+            },
+            WlShm::NAME => {
+                Self::handle::<WlShm>(registry, WL_SHM_VERSION, version, id, &mut self.shm_manager)
+            },
+            WlrLayerShell::NAME => unimplemented!()/*Self::handle::<WlrLayerShell>(
+                registry,
+                WLR_LAYER_SHELL_VERSION,
+                version,
+                id,
+                &mut self.shell_manager
+        )*/,
+            _ => info!("unhandled global: {}", interface)
+        }
+    }
+
+    fn handle<I: Interface + From<Proxy<I>>>(
+        registry: WlRegistry,
+        min_version: u32,
+        version: u32,
+        id: u32,
+        implementor: &mut GlobalImplementor<I>
+    ) {
+        if version < min_version {
+            implementor.error(version);
+        } else {
+            registry
+                .bind::<I, _>(version, id, |newp| implementor.new_global(newp))
+                .expect("wl_registry died unexpectedly");
+        }
+    }
+}

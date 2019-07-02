@@ -63,7 +63,8 @@ use std::{
     mem,
     os::unix::io::RawFd,
     path::PathBuf,
-    process::exit
+    process::exit,
+    rc::Rc
 };
 
 use clap::{App, Arg};
@@ -81,9 +82,13 @@ use xcb::xkb;
 
 // So the C code can link to these Rust functions.
 pub use crate::dbus::{dbus_session_refresh, dbus_system_refresh};
+use crate::wayland_obj::{WaylandManager, WAYLAND};
 
 use crate::lua::{LUA, NEXT_LUA};
-pub use wayland_protocols::xdg_shell::client::xdg_wm_base;
+pub use wayland_protocols::{
+    wlr::unstable::layer_shell::v1::client::zwlr_layer_shell_v1 as layer_shell,
+    xdg_shell::client::xdg_wm_base
+};
 
 const GIT_VERSION: &'static str = include_str!(concat!(env!("OUT_DIR"), "/git-version.txt"));
 pub const GLOBAL_SIGNALS: &'static str = "__awesome_global_signals";
@@ -262,30 +267,37 @@ fn init_wayland() -> (Display, EventQueue, GlobalManager) {
             [
                 wl_output::WlOutput,
                 wayland_obj::WL_OUTPUT_VERSION,
-                wayland_obj::WlOutputManager {}
+                wayland_obj::WlOutputManager::new(Rc::new(crate::lua::OutputHandler))
             ],
             [
                 wl_compositor::WlCompositor,
                 wayland_obj::WL_COMPOSITOR_VERSION,
-                wayland_obj::WlCompositorManager {}
+                wayland_obj::WlCompositorManager::default()
             ],
             [
                 wl_shm::WlShm,
                 wayland_obj::WL_SHM_VERSION,
-                wayland_obj::WlShmManager {}
-            ]
+                wayland_obj::WlShmManager::new()
+            ] /*[
+                  layer_shell::ZwlrLayerShellV1,
+                  wayland_obj::WLR_LAYER_SHELL_VERSION,
+                  wayland_obj::LayerShellManager
+              ]*/
         )
     );
     event_queue.sync_roundtrip().unwrap();
 
     globals
-        .instantiate_exact(wayland_obj::XDG_WM_BASE_VERSION, wayland_obj::xdg_shell_init)
+        .instantiate_exact(
+            wayland_obj::WLR_LAYER_SHELL_VERSION,
+            wayland_obj::layer_shell_init
+        )
         .unwrap_or_else(|err| {
             match err {
                 GlobalError::Missing => {
                     error!(
                         "Missing xdg_wm_base global (version {})",
-                        wayland_obj::XDG_WM_BASE_VERSION
+                        wayland_obj::WLR_LAYER_SHELL_VERSION
                     );
                     error!("Your compositor doesn't support the xdg shell protocol");
                     error!("This protocol is necessary for Awesome to function");
@@ -294,18 +306,20 @@ fn init_wayland() -> (Display, EventQueue, GlobalManager) {
                     error!(
                         "Got xdg_wm_base version {}, expected version {}",
                         version,
-                        wayland_obj::XDG_WM_BASE_VERSION
-                    );
-                    error!(
-                        "Your compositor doesn't support version {} \
-                         of the xdg shell protocol",
-                        wayland_obj::XDG_WM_BASE_VERSION
+                        wayland_obj::WLR_LAYER_SHELL_VERSION
                     );
                     error!("Ensure your compositor is up to date");
                 }
             }
             exit(1);
         });
+
+    // TODO Necessary?
+    //WAYLAND.with(|wayland| {
+    //    let wayland = &mut wayland.borrow_mut();
+    //    let way_man = WaylandManager::new(crate::lua::OutputHandler);
+    //    (*wayland).replace(way_man);
+    //});
 
     event_queue.sync_roundtrip().unwrap();
     (display, event_queue, globals)

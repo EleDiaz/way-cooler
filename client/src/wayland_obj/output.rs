@@ -1,6 +1,6 @@
 //! Wrapper around a wl_output
 
-use std::{cell::RefCell, fmt};
+use std::{cell::RefCell, fmt, rc::Rc};
 
 use wayland_client::{
     protocol::wl_output::{self, WlOutput},
@@ -14,6 +14,10 @@ use crate::objects::screen::{self, Screen};
 /// The minimum version of the wl_output global to bind to.
 pub const WL_OUTPUT_VERSION: u32 = 2;
 
+pub trait OutputEventHandler {
+    fn output_changed(&self, output: Output);
+}
+
 /// Wrapper around WlOutput.
 #[derive(Clone, Eq, PartialEq)]
 pub struct Output {
@@ -21,7 +25,15 @@ pub struct Output {
 }
 
 // Provides new WlOutputs with an implementation.
-pub struct WlOutputManager {}
+pub struct WlOutputManager {
+    handler: Rc<dyn OutputEventHandler>
+}
+
+impl WlOutputManager {
+    pub fn new(handler: Rc<dyn OutputEventHandler>) -> Self {
+        WlOutputManager { handler }
+    }
+}
 
 // Handle incoming events for WlOutput.
 pub struct WlOutputEventHandler {}

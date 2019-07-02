@@ -14,7 +14,21 @@ thread_local! {
     static WL_COMPOSITOR: RefCell<Option<WlCompositor>> = RefCell::new(None);
 }
 
-pub struct WlCompositorManager {}
+#[derive(Default)]
+pub struct WlCompositorManager {
+    compositor: Option<WlCompositor>
+}
+
+impl WlCompositorManager {
+    pub fn create_surface(&self) -> Result<WlSurface, ()> {
+        use wayland_client::Interface; // for ::NAME
+        let compositor = self.compositor.as_ref().expect(&format!(
+            "No WlCompositor registered. Make sure your compositor supports the {} protocol",
+            WlCompositor::NAME
+        ));
+        compositor.create_surface(NewProxy::implement_dummy)
+    }
+}
 
 impl GlobalImplementor<WlCompositor> for WlCompositorManager {
     fn new_global(&mut self, new_proxy: NewProxy<WlCompositor>) -> WlCompositor {

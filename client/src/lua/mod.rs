@@ -49,6 +49,49 @@ thread_local! {
     static MAIN_LOOP: RefCell<MainLoop> = RefCell::new(MainLoop::new(None, false));
 }
 
+pub struct OutputHandler;
+
+impl OutputHandler {
+    fn with_lua<R>(func: impl FnOnce(rlua::Context) -> R) -> R {
+        LUA.with(|lua| lua.borrow().context(|ctx| func(ctx)))
+    }
+}
+
+impl crate::wayland_obj::OutputEventHandler for OutputHandler {
+    fn output_changed(&self, output: crate::wayland_obj::Output) {
+        Self::with_lua(|lua| {
+            use crate::area::{Area, Origin, Size};
+            use crate::objects::screen::{add_screen, get_screen, Screen};
+            let screen = get_screen(lua, output.clone());
+
+            let (width, height) = output.resolution();
+            let geometry = Area {
+                origin: Origin { x: 0, y: 0 },
+                size: Size { width, height }
+            };
+
+            if let Ok(mut screen) = screen {
+                screen
+                    .set_geometry(lua, geometry)
+                    .expect("could not set geometry");
+                screen
+                    .set_workarea(lua, geometry)
+                    .expect("could not set workarea ");
+            } else {
+                // TODO We may not always want to add a new screen
+                // see how awesome does it and fix this.
+                trace!("Allocating screen for new output");
+                let mut screen = Screen::new(lua).expect("Could not allocate new screen");
+                screen
+                    .init_screens(output.clone(), vec![output])
+                    .expect("Could not initilize new output with a screen");
+
+                add_screen(lua, screen).expect("Could not add screen to the list of screens");
+            }
+        })
+    }
+}
+
 /// Loads shim code to act like Awesome.
 ///
 /// To be compatible this must eventually be removed.

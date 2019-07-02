@@ -1,13 +1,19 @@
 //! Wrappers around Wayland objects
 
+mod layer_shell;
+mod manager;
 mod output;
 mod wl_compositor;
+mod wl_seat;
 mod wl_shm;
-mod xdg_shell;
 
 pub use self::{
-    output::{Output, WlOutputManager, WL_OUTPUT_VERSION},
+    layer_shell::{
+        create_layer_surface, layer_shell_init, Layer, LayerShellManager, LayerSurface,
+        WLR_LAYER_SHELL_VERSION
+    },
+    manager::{create_buffer, global_callback, WaylandManager, WAYLAND},
+    output::{Output, OutputEventHandler, WlOutputManager, WL_OUTPUT_VERSION},
     wl_compositor::{create_surface, WlCompositorManager, WL_COMPOSITOR_VERSION},
-    wl_shm::{create_buffer, WlShmManager, WL_SHM_VERSION},
-    xdg_shell::{create_xdg_toplevel, xdg_shell_init, XdgToplevel, XDG_WM_BASE_VERSION}
+    wl_shm::{Buffer, WlShmManager, WL_SHM_VERSION}
 };

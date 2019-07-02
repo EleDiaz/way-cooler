@@ -5,7 +5,7 @@ max_width = 110
 # comments
 comment_width = 100
 wrap_comments = false # rustfmt is broken currently and doesn't softwrap
-normalize_comments = true
+normalize_comments = false
 
 # commas
 trailing_comma = "Never"

@@ -1,5 +1,39 @@
 //! Utility methods and structures
 
+use rlua::{self, FromLua, ToLua};
+
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+// negative values could be used for slide-out animations
+pub struct Margin {
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
+    pub left: i32
+}
+
+impl<'lua> ToLua<'lua> for Margin {
+    fn to_lua(self, lua: rlua::Context<'lua>) -> rlua::Result<rlua::Value<'lua>> {
+        let res = lua.create_table()?;
+        res.set("left", self.left)?;
+        res.set("right", self.right)?;
+        res.set("top", self.top)?;
+        res.set("bottom", self.bottom)?;
+        Ok(rlua::Value::Table(res))
+    }
+}
+
+impl<'lua> FromLua<'lua> for Margin {
+    fn from_lua(lua_value: rlua::Value<'lua>, lua: rlua::Context<'lua>) -> rlua::Result<Self> {
+        let table = rlua::Table::from_lua(lua_value, lua)?;
+        Ok(Margin {
+            left: table.get("left")?,
+            right: table.get("right")?,
+            top: table.get("top")?,
+            bottom: table.get("bottom")?
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Ord, PartialOrd)]
 /// Generic geometry-like struct. Contains an origin (x, y) point and bounds
 /// (width, height).
